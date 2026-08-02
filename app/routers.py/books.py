@@ -1,16 +1,14 @@
-from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
-from .authors import get_author_or_404
+from ..authors import get_author_or_404
 
 router = APIRouter(prefix="/books", tags=["books"])
 
 
-def get_book_or_404(book_id: int, db: Session) -> models.Book:
-    book = db.get(models.Book, book_id)
+def get_book_or_404(book_id: int, db: Session):
+    book = db.query(models.Book).filter(models.Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
     return book
@@ -18,8 +16,14 @@ def get_book_or_404(book_id: int, db: Session) -> models.Book:
 
 @router.post("/", response_model=schemas.BookResponse, status_code=status.HTTP_201_CREATED)
 def create_book(book: schemas.BookCreate, db: Session = Depends(get_db)):
-    get_author_or_404(book.author_id, db)  # no author -> no book
-    db_book = models.Book(**book.model_dump())
+    get_author_or_404(book.author_id, db)
+    
+    db_book = models.Book(
+        title=book.title,
+        description=book.description,
+        published_year=book.published_year,
+        author_id=book.author_id
+    )
     db.add(db_book)
     db.commit()
     db.refresh(db_book)
@@ -28,36 +32,49 @@ def create_book(book: schemas.BookCreate, db: Session = Depends(get_db)):
 
 @router.get("/", response_model=schemas.PaginatedBooks)
 def list_books(
-    skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=10, ge=1, le=100),
-    title: str | None = None,
-    author_id: int | None = None,
-    published_year: int | None = None,
-    sort_by: Literal["id", "title", "published_year"] = "id",
-    order: Literal["asc", "desc"] = "asc",
+    skip: int = 0,
+    limit: int = 10,
+    title: str = None,
+    author_id: int = None,
+    published_year: int = None,
+    sort_by: str = "id",
+    order: str = "asc",
     db: Session = Depends(get_db),
 ):
-    base_query = select(models.Book)
+    # Start the basic query
+    query = db.query(models.Book)
+    
+    # Apply filters using simple if statements
     if title:
-        base_query = base_query.where(models.Book.title.ilike(f"%{title}%"))
+        query = query.filter(models.Book.title.contains(title))
     if author_id is not None:
-        base_query = base_query.where(models.Book.author_id == author_id)
+        query = query.filter(models.Book.author_id == author_id)
     if published_year is not None:
-        base_query = base_query.where(models.Book.published_year == published_year)
+        query = query.filter(models.Book.published_year == published_year)
 
-    total = db.scalar(select(func.count()).select_from(base_query.subquery()))
+    total = query.count()
 
-    sort_column = getattr(models.Book, sort_by)
-    items_query = (
-        base_query
-        .options(selectinload(models.Book.author))
-        .order_by(sort_column.desc() if order == "desc" else sort_column.asc())
-        .offset(skip)
-        .limit(limit)
-    )
-    items = db.scalars(items_query).all()
+    if sort_by == "title":
+        if order == "desc":
+            query = query.order_by(models.Book.title.desc())
+        else:
+            query = query.order_by(models.Book.title.asc())
+    elif sort_by == "published_year":
+        if order == "desc":
+            query = query.order_by(models.Book.published_year.desc())
+        else:
+            query = query.order_by(models.Book.published_year.asc())
+    else:
 
-    return schemas.PaginatedBooks(total=total, skip=skip, limit=limit, items=items)
+        if order == "desc":
+            query = query.order_by(models.Book.id.desc())
+        else:
+            query = query.order_by(models.Book.id.asc())
+
+
+    items = query.offset(skip).limit(limit).all()
+
+    return {"total": total, "skip": skip, "limit": limit, "items": items}
 
 
 @router.get("/{book_id}", response_model=schemas.BookResponse)
@@ -68,11 +85,18 @@ def get_book(book_id: int, db: Session = Depends(get_db)):
 @router.put("/{book_id}", response_model=schemas.BookResponse)
 def update_book(book_id: int, payload: schemas.BookUpdate, db: Session = Depends(get_db)):
     book = get_book_or_404(book_id, db)
-    update_data = payload.model_dump(exclude_unset=True)
-    if "author_id" in update_data:
-        get_author_or_404(update_data["author_id"], db)
-    for field, value in update_data.items():
-        setattr(book, field, value)
+    
+    if payload.author_id is not None:
+        get_author_or_404(payload.author_id, db)
+        book.author_id = payload.author_id
+        
+    if payload.title is not None:
+        book.title = payload.title
+    if payload.description is not None:
+        book.description = payload.description
+    if payload.published_year is not None:
+        book.published_year = payload.published_year
+        
     db.commit()
     db.refresh(book)
     return book
