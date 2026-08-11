@@ -4,7 +4,9 @@ from sqlalchemy import select
 from .. import models, schemas
 from ..database import get_db
 from ..dependencies import get_current_user
-
+from sqlalchemy.orm import Session
+from  .. import models, schemas
+from ..database import get_db
 router = APIRouter(prefix="/authors", tags=["authors"])
 
 
