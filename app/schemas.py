@@ -1,4 +1,20 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+class UserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    password: str = Field(min_length=6, max_length=72)
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    model_config = ConfigDict(from_attributes=True)
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
 class AuthorBrief(BaseModel):
     id: int
     name: str
@@ -11,8 +27,6 @@ class BookBrief(BaseModel):
     published_year: int | None = None
     model_config = ConfigDict(from_attributes=True)
 
-
-#Author
 
 class AuthorBase(BaseModel):
     name: str
@@ -34,7 +48,6 @@ class AuthorResponse(AuthorBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-#Book
 
 class BookBase(BaseModel):
     title: str
@@ -59,7 +72,6 @@ class BookResponse(BookBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-#Pagination
 
 class PaginatedBooks(BaseModel):
     total: int
